@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Zombie Survival Game</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #renderDiv {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    canvas {
+      background-color: #5d0000;
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body>
+  <div id="renderDiv"></div>
+  <script>
+    class GameState {
+      constructor() {
+        this.score = 0;
+        this.health = 100;
+        this.gameOver = false;
+      }
+    }
+
+    class Player {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 20;
+        this.speed = 0;
+        this.health = 100;
+        this.rotation = 0;
+        this.bullets = [];
+        this.shootCooldown = 0;
+        this.gunLength = 30;
+        this.bulletDamage = 100;
+        this.shootCooldownTime = 5;
+        this.bulletSpeed = 15;
+
+        this.playerImage = new Image();
+        this.playerImage.src = 'https://play.rosebud.ai/assets/player.png?uGzU';
+        this.spriteSize = 50;
+      }
+
+      update(keys, width, height) {
+        this.x = width / 2;
+        this.y = height / 2;
+        if (this.shootCooldown > 0) this.shootCooldown--;
+      }
+
+      updateRotation(mouse) {
+        const dx = mouse.x - this.x;
+        const dy = mouse.y - this.y;
+        this.rotation = Math.atan2(dy, dx);
+      }
+
+      shoot(zombies, gameState) {
+        if (this.shootCooldown > 0) return;
+        this.shootCooldown = this.shootCooldownTime;
+
+        const gunEndX = this.x + Math.cos(this.rotation) * this.gunLength;
+        const gunEndY = this.y + Math.sin(this.rotation) * this.gunLength;
+
+        this.bullets.push({
+          x: gunEndX,
+          y: gunEndY,
+          radius: 5,
+          color: '#ff0000',
+          speed: this.bulletSpeed,
+          direction: this.rotation
+        });
+      }
+
+      updateBullets(zombies, gameState, width, height) {
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+          const bullet = this.bullets[i];
+          bullet.x += Math.cos(bullet.direction) * bullet.speed;
+          bullet.y += Math.sin(bullet.direction) * bullet.speed;
+
+          if (bullet.x < 0 || bullet.x > width || bullet.y < 0 || bullet.y > height) {
+            this.bullets.splice(i, 1);
+            continue;
+          }
+
+          for (let j = 0; j < zombies.length; j++) {
+            const zombie = zombies[j];
+            const dx = bullet.x - zombie.x;
+            const dy = bullet.y - zombie.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < bullet.radius + zombie.radius) {
+              this.bullets.splice(i, 1);
+              zombie.health -= this.bulletDamage;
+              if (zombie.health <= 0) {
+                zombies.splice(j, 1);
+                gameState.score += 10;
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation - Math.PI / 2);
+        if (this.playerImage.complete) {
+          ctx.drawImage(this.playerImage, -this.spriteSize / 2, -this.spriteSize / 2, this.spriteSize, this.spriteSize);
+        } else {
+          ctx.fillStyle = '#3498db';
+          ctx.beginPath();
+          ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      drawBullets(ctx) {
+        for (const bullet of this.bullets) {
+          ctx.fillStyle = bullet.color;
+          ctx.beginPath();
+          ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    class EnemyManager {
+      constructor(player, gameState, width, height) {
+        this.player = player;
+        this.gameState = gameState;
+        this.zombies = [];
+        this.spawnRate = 1600;
+        this.minSpawnRate = 500;
+        this.spawnRateDecreasePerZombie = 100;
+        this.zombiesSpawned = 0;
+        this.canvasWidth = width;
+        this.canvasHeight = height;
+
+        this.enemyImage = new Image();
+        this.enemyImage.src = 'https://play.rosebud.ai/assets/enemy.png?x4WY';
+        this.spriteSize = 40;
+
+        this.spawnZombie();
+      }
+
+      spawnZombie() {
+  // Random angle between 0 and 2π
+  const angle = Math.random() * Math.PI * 2;
+  // Increase the minimum and maximum spawn distance to make zombies spawn farther from the player
+  const distance = Math.random() * (Math.max(this.canvasWidth, this.canvasHeight) / 0.5) + Math.max(this.canvasWidth, this.canvasHeight) / 1;
+  const x = this.player.x + Math.cos(angle) * distance;
+  const y = this.player.y + Math.sin(angle) * distance;
+
+  this.zombies.push({
+    x,
+    y,
+    radius: 20,
+    speed: 0.5 + Math.random() * 0.5,
+    health: 100,
+    rotation: 0
+  });
+
+  setTimeout(() => {
+    if (!this.gameState.gameOver) this.spawnZombie();
+  }, this.spawnRate);
+
+  this.zombiesSpawned++;
+  if (this.zombiesSpawned % 5 === 0) {
+    this.spawnRate = Math.max(this.minSpawnRate, this.spawnRate - this.spawnRateDecreasePerZombie);
+  }
+}
+
+
+      update(deltaTime) {
+        for (const zombie of this.zombies) {
+          const dx = this.player.x - zombie.x;
+          const dy = this.player.y - zombie.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const dirX = dx / distance;
+          const dirY = dy / distance;
+
+          zombie.x += dirX * zombie.speed * (deltaTime / 16);
+          zombie.y += dirY * zombie.speed * (deltaTime / 16);
+          zombie.rotation = Math.atan2(dy, dx);
+        }
+      }
+
+      checkCollisions() {
+        for (const zombie of this.zombies) {
+          const dx = zombie.x - this.player.x;
+          const dy = zombie.y - this.player.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < zombie.radius + this.player.radius) {
+            this.player.health -= 1;
+            this.gameState.health = this.player.health;
+            if (this.player.health <= 0) {
+              this.gameState.gameOver = true;
+            }
+          }
+        }
+      }
+
+      draw(ctx) {
+        for (const zombie of this.zombies) {
+          ctx.save();
+          ctx.translate(zombie.x, zombie.y);
+          ctx.rotate(zombie.rotation);
+          if (this.enemyImage.complete) {
+            ctx.drawImage(this.enemyImage, -this.spriteSize / 2, -this.spriteSize / 2, this.spriteSize, this.spriteSize);
+          } else {
+            ctx.fillStyle = '#2ecc71';
+            ctx.beginPath();
+            ctx.arc(0, 0, zombie.radius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+      }
+    }
+
+    class UIManager {
+  constructor(container, gameState) {
+    this.gameState = gameState;
+    this.uiContainer = document.createElement('div');
+    this.uiContainer.style.position = 'absolute';
+    this.uiContainer.style.top = '20px';
+    this.uiContainer.style.left = '20px';
+    this.uiContainer.style.color = 'white';
+    this.uiContainer.style.fontFamily = 'Arial, sans-serif';
+    container.appendChild(this.uiContainer);
+
+    this.scoreElement = document.createElement('div');
+    this.healthElement = document.createElement('div');
+    this.uiContainer.appendChild(this.scoreElement);
+    this.uiContainer.appendChild(this.healthElement);
+
+    this.gameOverScreen = document.createElement('div');
+    this.gameOverScreen.style.position = 'absolute';
+    this.gameOverScreen.style.top = '50%';
+    this.gameOverScreen.style.left = '50%';
+    this.gameOverScreen.style.transform = 'translate(-50%, -50%)';
+    this.gameOverScreen.style.color = 'white';
+    this.gameOverScreen.style.fontSize = '64px';  // Increased font size for Game Over text
+    this.gameOverScreen.style.display = 'none';
+    container.appendChild(this.gameOverScreen);
+
+    const instructions = document.createElement('div');
+    instructions.style.position = 'absolute';
+    instructions.style.bottom = '20px';
+    instructions.style.left = '20px';
+    instructions.style.color = 'white';
+    instructions.style.fontSize = '36px';  // Increased font size for instructions
+    instructions.textContent = 'Touch anywhere to aim and shoot. <Made_in_BD>';
+    container.appendChild(instructions);
+  }
+
+  update() {
+    this.scoreElement.textContent = `Score: ${this.gameState.score}`;
+    this.healthElement.textContent = `Health: ${this.gameState.health}`;
+    this.scoreElement.style.fontSize = '36px';  // Increased font size for score
+    this.healthElement.style.fontSize = '36px';  // Increased font size for health
+    if (this.gameState.gameOver) {
+      this.gameOverScreen.style.display = 'block';
+      this.gameOverScreen.innerHTML = `
+        GAME OVER<br>
+        Final Score: ${this.gameState.score}<br>
+        <span style="font-size: 24px">Refresh to play again</span>  <!-- Slightly smaller font for the instructions -->
+      `;
+    }
+  }
+}
+
+
+    class Game {
+      constructor(canvas, gameState) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.gameState = gameState;
+        this.width = canvas.width;
+        this.height = canvas.height;
+        this.mouse = { x: this.width / 2, y: this.height / 2 };
+        this.player = new Player(this.width / 2, this.height / 2);
+        this.enemyManager = new EnemyManager(this.player, this.gameState, this.width, this.height);
+        this.uiManager = new UIManager(document.getElementById('renderDiv'), this.gameState);
+
+        window.addEventListener('mousemove', e => {
+          const rect = canvas.getBoundingClientRect();
+          this.mouse.x = e.clientX - rect.left;
+          this.mouse.y = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mousedown', () => this.player.shoot(this.enemyManager.zombies, this.gameState));
+
+        canvas.addEventListener('touchstart', () => this.player.shoot(this.enemyManager.zombies, this.gameState));
+        canvas.addEventListener('touchmove', e => {
+          const rect = canvas.getBoundingClientRect();
+          if (e.touches.length > 0) {
+            this.mouse.x = e.touches[0].clientX - rect.left;
+            this.mouse.y = e.touches[0].clientY - rect.top;
+          }
+        });
+
+        window.addEventListener('resize', () => {
+          this.resizeCanvas();
+        });
+
+        this.resizeCanvas();
+        requestAnimationFrame(ts => this.gameLoop(ts));
+      }
+
+      resizeCanvas() {
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+      }
+
+      gameLoop(timestamp) {
+        if (!this.lastTime) this.lastTime = timestamp;
+        const deltaTime = timestamp - this.lastTime;
+        this.lastTime = timestamp;
+
+        this.update(deltaTime);
+        this.draw();
+
+        if (!this.gameState.gameOver) requestAnimationFrame(ts => this.gameLoop(ts));
+      }
+
+      update(deltaTime) {
+        this.player.update(null, this.width, this.height);
+        this.player.updateRotation(this.mouse);
+        this.player.updateBullets(this.enemyManager.zombies, this.gameState, this.width, this.height);
+        this.enemyManager.update(deltaTime);
+        this.enemyManager.checkCollisions();
+        this.uiManager.update();
+      }
+
+      draw() {
+        this.ctx.clearRect(0, 0, this.width, this.height);
+        this.player.draw(this.ctx);
+        this.player.drawBullets(this.ctx);
+        this.enemyManager.draw(this.ctx);
+      }
+    }
+
+    const container = document.getElementById('renderDiv');
+    const canvas = document.createElement('canvas');
+    container.appendChild(canvas);
+
+    const gameState = new GameState();
+    const game = new Game(canvas, gameState);
+  </script>
+</body>
+</html>
